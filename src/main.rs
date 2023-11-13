@@ -4,10 +4,10 @@ mod controller;
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::{stdin, Read, Write},
+    io::{self, stdin, Read, Write},
     os::unix::net::UnixListener,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering},
         Arc,
     },
     thread,
@@ -57,17 +57,41 @@ fn main() {
 fn handle_args(args: CmdArgs) {
     match args.commands {
         Commands::Watch { interval, path } => {
-            let exit_signal = Arc::new(AtomicBool::new(false));
-            let ctrc_exit_sig = exit_signal.clone();
-            ctrlc::set_handler(move || {
-                ctrc_exit_sig.store(true, Ordering::SeqCst);
-            })
-            .unwrap();
+            let signal = Arc::new(AtomicIsize::new(0));
+            let sig_clone = signal.clone();
             print!("Update Interval: {interval} seconds\n");
             let t = thread::spawn(move || {
                 let mut controller = Controller::new(&path);
-                controller.watch(interval, &exit_signal);
+                controller.watch(interval, &sig_clone);
             });
+
+            let mut buf = String::with_capacity(1024);
+
+            loop {
+                let size = stdin().read_line(&mut buf).unwrap();
+                if size != 0 {
+                    let cmd = buf.trim();
+                    if cmd == "q" {
+                        print!("Exiting...\n");
+                        signal.store(-1, Ordering::SeqCst);
+                        break;
+                    } else if cmd == "m" {
+                        print!("Changing Power mode\n");
+                        signal.store(1, Ordering::SeqCst);
+                    } else if cmd == "i" || cmd == "s" {
+                        print!("Showing Info...\n");
+                        signal.store(2, Ordering::SeqCst);
+                    } else if cmd == "r" {
+                        print!("Reloading...\n");
+                        signal.store(3, Ordering::SeqCst);
+                    } else {
+                        eprint!("Unknown command: {cmd}\n");
+                    }
+
+                    buf.clear();
+                }
+            }
+            print!("Joining thread...\n");
             t.join();
         }
         Commands::Info => {

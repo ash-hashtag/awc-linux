@@ -1,7 +1,7 @@
 use std::{
     fs::OpenOptions,
     io::{Read, Write},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicIsize, Ordering},
     thread,
     time::{Duration, SystemTime},
 };
@@ -41,6 +41,13 @@ pub struct AlienDevGraphInfo {
     dev: &'static AlienDevInfo,
     graph: Vec<CoOrdinates>,
     last_fan_boost: u8,
+    last_fan_rpm_recorded: LastFanRPMRecorded,
+}
+
+#[derive(Debug)]
+pub struct LastFanRPMRecorded {
+    rpm: i64,
+    ts: SystemTime,
 }
 
 pub struct Controller {
@@ -60,51 +67,112 @@ impl Controller {
         }
     }
 
-    pub fn update(&mut self) {
-        let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-        print!("{CYAN}{}{RESET}\n", current_time);
-        print!("Power Mode: {BOLD}{}{RESET}\n", self.power_mode);
-        for info in &mut self.alien_dev_graph_infos {
-            let temp = get_temp(info.dev.sen_id) as u8;
-            print!(
-                "{} Sensor {BOLD}#{}{RESET} Temp: {YELLOW}{}{RESET}\n",
-                info.dev.name, info.dev.sen_id, temp
-            );
-            let boost = get_boost_from_temp(temp, &info.graph);
-            if boost.abs_diff(info.last_fan_boost) > 20 {
-                let result = set_fan_boost(info.dev.fan_id, boost);
-                let rpm = get_fan_rpm(info.dev.fan_id);
-                print!(
-                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",
-                    info.dev.fan_id, boost,rpm, result
-                );
-                info.last_fan_boost = boost;
-            } else {
-                let rpm = get_fan_rpm(info.dev.fan_id);
-                print!(
-                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET}\n",
-                    info.dev.fan_id, info.last_fan_boost, rpm
-                );
-            }
-        }
-    }
+    // pub fn update(&mut self) {
+    //     for info in &mut self.alien_dev_graph_infos {
+    //         let temp = get_temp(info.dev.sen_id) as u8;
+    //         print!(
+    //             "{} Sensor {BOLD}#{}{RESET} Temp: {YELLOW}{}{RESET}\n",
+    //             info.dev.name, info.dev.sen_id, temp
+    //         );
+    //         let rpm = get_fan_rpm(info.dev.fan_id);
+    //         if info.last_fan_rpm_recorded.ts.elapsed().unwrap().as_secs() > 0 {}
+    //         let boost = get_boost_from_temp(temp, &info.graph);
+    //         if boost != info.last_fan_boost {
+    //             let result = set_fan_boost(info.dev.fan_id, boost);
+    //             print!(
+    //                 "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",
+    //                 info.dev.fan_id, boost,rpm, result
+    //             );
+    //             info.last_fan_boost = boost;
+    //         } else {
+    //             let rpm = get_fan_rpm(info.dev.fan_id);
+    //             print!(
+    //                 "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET}\n",
+    //                 info.dev.fan_id, info.last_fan_boost, rpm
+    //             );
+    //         }
+    //     }
+    // }
 
-    pub fn watch(&mut self, update_interval_in_seconds: u64, exit_sig: &AtomicBool) {
+    pub fn watch(&mut self, update_interval_in_seconds: u64, exit_sig: &AtomicIsize) {
         let sec_dur = Duration::from_secs(1);
         loop {
             if self.power_mode == 0 {
-                self.update();
+                let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+                print!("{CYAN}{}{RESET}\n", current_time);
+                print!("Power Mode: {BOLD}{}{RESET}\n", self.power_mode);
+                for info in &mut self.alien_dev_graph_infos {
+                    let rpm = get_fan_rpm(info.dev.fan_id);
+                    if !(rpm == 0 && info.last_fan_boost == 0)
+                        && info.last_fan_rpm_recorded.rpm == rpm
+                        && info.last_fan_rpm_recorded.ts.elapsed().unwrap().as_secs()
+                            > update_interval_in_seconds * 3
+                    {
+                        let result = set_fan_boost(info.dev.fan_id, 0);
+                        print!(
+                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}0{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",info.dev.fan_id, rpm, result
+                );
+                        thread::sleep(sec_dur);
+                    }
+                    let rpm = get_fan_rpm(info.dev.fan_id);
+                    if rpm != info.last_fan_rpm_recorded.rpm {
+                        info.last_fan_rpm_recorded = LastFanRPMRecorded {
+                            rpm,
+                            ts: SystemTime::now(),
+                        };
+                    }
+                    let temp = get_temp(info.dev.sen_id) as u8;
+                    print!(
+                        "{} Sensor {BOLD}#{}{RESET} Temp: {YELLOW}{}{RESET}\n",
+                        info.dev.name, info.dev.sen_id, temp
+                    );
+                    let boost = get_boost_from_temp(temp, &info.graph);
+                    if boost != info.last_fan_boost {
+                        let result = set_fan_boost(info.dev.fan_id, boost);
+                        print!(
+                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",
+                    info.dev.fan_id, boost,rpm, result
+                );
+                        info.last_fan_boost = boost;
+                    } else {
+                        let rpm = get_fan_rpm(info.dev.fan_id);
+                        print!(
+                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET}\n",
+                    info.dev.fan_id, info.last_fan_boost, rpm
+                );
+                    }
+                }
             }
             for i in 0..update_interval_in_seconds {
-                if exit_sig.load(Ordering::SeqCst) {
-                    if self.power_mode == 0 {
-                        set_both_fan_boosts(0);
-                    } else {
-                        self.toggle_mode();
+                let sig_val = exit_sig.load(Ordering::SeqCst);
+                if sig_val != 0 {
+                    exit_sig.store(0, Ordering::SeqCst);
+                    match sig_val {
+                        -1 => {
+                            if self.power_mode == 0 {
+                                set_both_fan_boosts(0);
+                            } else {
+                                self.toggle_mode();
+                            }
+                            print!("Watching Stopped Gracefully\n");
+                            return;
+                        }
+                        1 => {
+                            self.toggle_mode();
+                        }
+                        2 => show_all_info(),
+                        3 => {
+                            if self.power_mode == 0 {
+                                set_both_fan_boosts(0);
+                            }
+                        }
+                        4 => {
+                            break;
+                        }
+                        _ => {}
                     }
-                    print!("Watching Stopped Gracefully\n");
-                    return;
                 }
+
                 thread::sleep(sec_dur);
             }
         }
@@ -118,7 +186,7 @@ impl Controller {
 pub fn set_both_fan_boosts(value: u8) {
     for dev in &ALIEN_DEVICES {
         print!(
-            "Fan #{}: {} result: {}\n",
+            "Fan #{BOLD}{}{RESET}: {YELLOW}{}{RESET}/255 result: {}\n",
             dev.fan_id,
             value,
             set_fan_boost(dev.fan_id, value)
@@ -181,16 +249,26 @@ pub fn load_graph(file_path: &str) -> [AlienDevGraphInfo; 2] {
     let line0 = lines.next().unwrap();
     let line1 = lines.next().unwrap();
 
+    let now = SystemTime::now();
+
     return [
         AlienDevGraphInfo {
             dev: &ALIEN_DEVICES[0],
             graph: line_to_coords(line0),
             last_fan_boost: get_fan_boost(ALIEN_DEVICES[0].fan_id),
+            last_fan_rpm_recorded: LastFanRPMRecorded {
+                rpm: get_fan_rpm(ALIEN_DEVICES[0].fan_id),
+                ts: now,
+            },
         },
         AlienDevGraphInfo {
             dev: &ALIEN_DEVICES[1],
             graph: line_to_coords(line1),
             last_fan_boost: get_fan_boost(ALIEN_DEVICES[1].fan_id),
+            last_fan_rpm_recorded: LastFanRPMRecorded {
+                rpm: get_fan_rpm(ALIEN_DEVICES[1].fan_id),
+                ts: now,
+            },
         },
     ];
 }
