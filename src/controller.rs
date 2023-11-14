@@ -56,8 +56,8 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(graph_path: &str) -> Self {
-        let alien_dev_graph_infos = load_graph(graph_path);
+    pub fn new(alien_dev_graph_infos: [AlienDevGraphInfo; 2]) -> Self {
+        // let alien_dev_graph_infos = load_graph_from_string(graphs_string);
         let power_mode = get_power_mode() as u8;
         dbg!(&alien_dev_graph_infos);
 
@@ -66,33 +66,6 @@ impl Controller {
             alien_dev_graph_infos,
         }
     }
-
-    // pub fn update(&mut self) {
-    //     for info in &mut self.alien_dev_graph_infos {
-    //         let temp = get_temp(info.dev.sen_id) as u8;
-    //         print!(
-    //             "{} Sensor {BOLD}#{}{RESET} Temp: {YELLOW}{}{RESET}\n",
-    //             info.dev.name, info.dev.sen_id, temp
-    //         );
-    //         let rpm = get_fan_rpm(info.dev.fan_id);
-    //         if info.last_fan_rpm_recorded.ts.elapsed().unwrap().as_secs() > 0 {}
-    //         let boost = get_boost_from_temp(temp, &info.graph);
-    //         if boost != info.last_fan_boost {
-    //             let result = set_fan_boost(info.dev.fan_id, boost);
-    //             print!(
-    //                 "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",
-    //                 info.dev.fan_id, boost,rpm, result
-    //             );
-    //             info.last_fan_boost = boost;
-    //         } else {
-    //             let rpm = get_fan_rpm(info.dev.fan_id);
-    //             print!(
-    //                 "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET}\n",
-    //                 info.dev.fan_id, info.last_fan_boost, rpm
-    //             );
-    //         }
-    //     }
-    // }
 
     pub fn watch(&mut self, update_interval_in_seconds: u64, exit_sig: &AtomicIsize) {
         let milli_sec_dur = Duration::from_millis(200);
@@ -111,7 +84,7 @@ impl Controller {
                                 > update_interval_in_seconds * 3
                         {
                             let result = set_fan_boost(info.dev.fan_id, 0);
-                            print!("Fan {BOLD}#{}{RESET} Boost: {YELLOW}0{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",info.dev.fan_id, rpm, result);
+                            print!("Fan {BOLD}#{}{RESET} Boost: {YELLOW}0{RESET}/255 RPM: {CYAN}{}{RESET} Result: {}\n",info.dev.fan_id, rpm, result);
                             thread::sleep(milli_sec_dur);
                         }
                     }
@@ -149,7 +122,6 @@ impl Controller {
                             } else {
                                 self.toggle_mode();
                             }
-                            print!("Watching Stopped Gracefully\n");
                             return;
                         }
                         1 => {
@@ -225,10 +197,53 @@ fn get_temp(sen_id: u8) -> i64 {
     run_main_command(0x14, 4, sen_id, 0)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct CoOrdinates {
     temp: u8,
     fan_boost: u8,
+}
+
+pub fn load_graph_from_string(s: &str) -> [AlienDevGraphInfo; 2] {
+    let mut lines = s.lines();
+    let line0 = lines.next().unwrap();
+    let line1 = lines.next().unwrap();
+
+    return get_alien_dev_graph_info(line_to_coords(line0), line_to_coords(line1));
+}
+
+pub fn get_coords_from_string(s: &str) -> (Vec<CoOrdinates>, Vec<CoOrdinates>) {
+    let mut lines = s.lines();
+    let line0 = lines.next().unwrap();
+    let line1 = lines.next().unwrap();
+    return (line_to_coords(line0), line_to_coords(line1));
+}
+
+pub fn get_alien_dev_graph_info(
+    cpu_graph: Vec<CoOrdinates>,
+    gpu_graph: Vec<CoOrdinates>,
+) -> [AlienDevGraphInfo; 2] {
+    let now = SystemTime::now();
+
+    return [
+        AlienDevGraphInfo {
+            dev: &ALIEN_DEVICES[0],
+            graph: cpu_graph,
+            last_fan_boost: get_fan_boost(ALIEN_DEVICES[0].fan_id),
+            last_fan_rpm_recorded: LastFanRPMRecorded {
+                rpm: get_fan_rpm(ALIEN_DEVICES[0].fan_id),
+                ts: now,
+            },
+        },
+        AlienDevGraphInfo {
+            dev: &ALIEN_DEVICES[1],
+            graph: gpu_graph,
+            last_fan_boost: get_fan_boost(ALIEN_DEVICES[1].fan_id),
+            last_fan_rpm_recorded: LastFanRPMRecorded {
+                rpm: get_fan_rpm(ALIEN_DEVICES[1].fan_id),
+                ts: now,
+            },
+        },
+    ];
 }
 
 pub fn load_graph(file_path: &str) -> [AlienDevGraphInfo; 2] {
@@ -240,32 +255,34 @@ pub fn load_graph(file_path: &str) -> [AlienDevGraphInfo; 2] {
         .read_to_string(&mut buf)
         .unwrap();
 
-    let mut lines = buf.lines();
-    let line0 = lines.next().unwrap();
-    let line1 = lines.next().unwrap();
+    load_graph_from_string(&buf)
 
-    let now = SystemTime::now();
+    // let mut lines = buf.lines();
+    // let line0 = lines.next().unwrap();
+    // let line1 = lines.next().unwrap();
 
-    return [
-        AlienDevGraphInfo {
-            dev: &ALIEN_DEVICES[0],
-            graph: line_to_coords(line0),
-            last_fan_boost: get_fan_boost(ALIEN_DEVICES[0].fan_id),
-            last_fan_rpm_recorded: LastFanRPMRecorded {
-                rpm: get_fan_rpm(ALIEN_DEVICES[0].fan_id),
-                ts: now,
-            },
-        },
-        AlienDevGraphInfo {
-            dev: &ALIEN_DEVICES[1],
-            graph: line_to_coords(line1),
-            last_fan_boost: get_fan_boost(ALIEN_DEVICES[1].fan_id),
-            last_fan_rpm_recorded: LastFanRPMRecorded {
-                rpm: get_fan_rpm(ALIEN_DEVICES[1].fan_id),
-                ts: now,
-            },
-        },
-    ];
+    // let now = SystemTime::now();
+
+    // return [
+    //     AlienDevGraphInfo {
+    //         dev: &ALIEN_DEVICES[0],
+    //         graph: line_to_coords(line0),
+    //         last_fan_boost: get_fan_boost(ALIEN_DEVICES[0].fan_id),
+    //         last_fan_rpm_recorded: LastFanRPMRecorded {
+    //             rpm: get_fan_rpm(ALIEN_DEVICES[0].fan_id),
+    //             ts: now,
+    //         },
+    //     },
+    //     AlienDevGraphInfo {
+    //         dev: &ALIEN_DEVICES[1],
+    //         graph: line_to_coords(line1),
+    //         last_fan_boost: get_fan_boost(ALIEN_DEVICES[1].fan_id),
+    //         last_fan_rpm_recorded: LastFanRPMRecorded {
+    //             rpm: get_fan_rpm(ALIEN_DEVICES[1].fan_id),
+    //             ts: now,
+    //         },
+    //     },
+    // ];
 }
 
 fn line_to_coords(line: &str) -> Vec<CoOrdinates> {

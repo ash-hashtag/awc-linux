@@ -18,8 +18,6 @@ use std::{
 use clap::{CommandFactory, Parser, Subcommand};
 use controller::*;
 
-const SOCKET_PATH: &'static str = "/tmp/awcc";
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -60,40 +58,77 @@ fn handle_args(args: CmdArgs) {
         Commands::Watch { interval, path } => {
             let signal = Arc::new(AtomicIsize::new(0));
             let sig_clone = signal.clone();
-            print!("Update Interval: {interval} seconds and using fan curves from {path}\n");
-            let t = thread::spawn(move || {
-                let mut controller = Controller::new(&path);
-                controller.watch(interval, &sig_clone);
-            });
-
+            let p = path.clone();
             let mut buf = String::with_capacity(1024);
+            {
+                OpenOptions::new()
+                    .read(true)
+                    .open(path)
+                    .unwrap()
+                    .read_to_string(&mut buf)
+                    .unwrap();
+            }
+
+            let (cpu_graph, gpu_graph) = get_coords_from_string(&buf);
+
+            let alien_dev_infos = get_alien_dev_graph_info(cpu_graph.clone(), gpu_graph.clone());
+            print!("Update Interval: {interval} seconds and using fan curves from {p}\n");
+
+            let mut t = Some(thread::spawn(move || {
+                let mut controller = Controller::new(alien_dev_infos);
+                controller.watch(interval, &sig_clone);
+            }));
 
             loop {
+                buf.clear();
                 let size = stdin().read_line(&mut buf).unwrap();
                 if size != 0 {
                     let cmd = buf.trim();
-                    if cmd == "q" {
-                        print!("Exiting...\n");
-                        signal.store(-1, Ordering::SeqCst);
-                        break;
-                    } else if cmd == "m" {
-                        print!("Changing Power mode\n");
-                        signal.store(1, Ordering::SeqCst);
-                    } else if cmd == "i" || cmd == "s" {
-                        print!("Showing Info...\n");
-                        signal.store(2, Ordering::SeqCst);
-                    } else if cmd == "r" {
-                        print!("Reloading...\n");
-                        signal.store(3, Ordering::SeqCst);
-                    } else {
-                        eprint!("Unknown command: {cmd}\n");
+                    match cmd {
+                        "q" => {
+                            print!("Exiting...\n");
+                            signal.store(-1, Ordering::SeqCst);
+                            break;
+                        }
+                        "m" => {
+                            print!("Changing Power mode\n");
+                            signal.store(1, Ordering::SeqCst);
+                        }
+                        "i" | "s" => {
+                            print!("Showing Info...\n");
+                            signal.store(2, Ordering::SeqCst);
+                        }
+                        "r" => {
+                            print!("Reloading...\n");
+                            signal.store(3, Ordering::SeqCst);
+                        }
+                        "p" => {
+                            if let Some(t) = t.take() {
+                                signal.store(-1, Ordering::SeqCst);
+                                t.join();
+                                print!("Paused Watch\n");
+                            } else {
+                                signal.store(0, Ordering::SeqCst);
+                                let sig_clone = signal.clone();
+                                let alien_dev_infos =
+                                    get_alien_dev_graph_info(cpu_graph.clone(), gpu_graph.clone());
+                                t = Some(thread::spawn(move || {
+                                    let mut controller = Controller::new(alien_dev_infos);
+                                    controller.watch(interval, &sig_clone);
+                                }));
+                                print!("Resumed Watch\n");
+                            }
+                        }
+                        _ => {
+                            eprint!("Unknown command: {cmd}\n");
+                        }
                     }
-
-                    buf.clear();
                 }
             }
             print!("Joining thread...\n");
-            t.join();
+            if let Some(t) = t {
+                t.join();
+            }
         }
         Commands::Info => {
             show_all_info();
