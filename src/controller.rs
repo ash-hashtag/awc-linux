@@ -95,24 +95,25 @@ impl Controller {
     // }
 
     pub fn watch(&mut self, update_interval_in_seconds: u64, exit_sig: &AtomicIsize) {
-        let sec_dur = Duration::from_secs(1);
+        let milli_sec_dur = Duration::from_millis(200);
         loop {
             if self.power_mode == 0 {
                 let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                 print!("{CYAN}{}{RESET}\n", current_time);
                 print!("Power Mode: {BOLD}{}{RESET}\n", self.power_mode);
                 for info in &mut self.alien_dev_graph_infos {
-                    let rpm = get_fan_rpm(info.dev.fan_id);
-                    if !(rpm == 0 && info.last_fan_boost == 0)
-                        && info.last_fan_rpm_recorded.rpm == rpm
-                        && info.last_fan_rpm_recorded.ts.elapsed().unwrap().as_secs()
-                            > update_interval_in_seconds * 3
                     {
-                        let result = set_fan_boost(info.dev.fan_id, 0);
-                        print!(
-                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}0{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",info.dev.fan_id, rpm, result
-                );
-                        thread::sleep(sec_dur);
+                        // Some bug fix where fans stuck at the same rpm and won't change
+                        let rpm = get_fan_rpm(info.dev.fan_id);
+                        if !(rpm == 0 && info.last_fan_boost == 0)
+                            && info.last_fan_rpm_recorded.rpm == rpm
+                            && info.last_fan_rpm_recorded.ts.elapsed().unwrap().as_secs()
+                                > update_interval_in_seconds * 3
+                        {
+                            let result = set_fan_boost(info.dev.fan_id, 0);
+                            print!("Fan {BOLD}#{}{RESET} Boost: {YELLOW}0{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",info.dev.fan_id, rpm, result);
+                            thread::sleep(milli_sec_dur);
+                        }
                     }
                     let rpm = get_fan_rpm(info.dev.fan_id);
                     if rpm != info.last_fan_rpm_recorded.rpm {
@@ -129,21 +130,15 @@ impl Controller {
                     let boost = get_boost_from_temp(temp, &info.graph);
                     if boost != info.last_fan_boost {
                         let result = set_fan_boost(info.dev.fan_id, boost);
-                        print!(
-                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",
-                    info.dev.fan_id, boost,rpm, result
-                );
+                        print!("Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",info.dev.fan_id, boost,rpm, result);
                         info.last_fan_boost = boost;
                     } else {
                         let rpm = get_fan_rpm(info.dev.fan_id);
-                        print!(
-                    "Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET}\n",
-                    info.dev.fan_id, info.last_fan_boost, rpm
-                );
+                        print!("Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET}\n",info.dev.fan_id, info.last_fan_boost, rpm);
                     }
                 }
             }
-            for i in 0..update_interval_in_seconds {
+            for i in 0..(update_interval_in_seconds * 5) {
                 let sig_val = exit_sig.load(Ordering::SeqCst);
                 if sig_val != 0 {
                     exit_sig.store(0, Ordering::SeqCst);
@@ -173,7 +168,7 @@ impl Controller {
                     }
                 }
 
-                thread::sleep(sec_dur);
+                thread::sleep(milli_sec_dur);
             }
         }
     }

@@ -5,6 +5,7 @@ mod controller;
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, stdin, Read, Write},
+    ops::Deref,
     os::unix::net::UnixListener,
     sync::{
         atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering},
@@ -59,7 +60,7 @@ fn handle_args(args: CmdArgs) {
         Commands::Watch { interval, path } => {
             let signal = Arc::new(AtomicIsize::new(0));
             let sig_clone = signal.clone();
-            print!("Update Interval: {interval} seconds\n");
+            print!("Update Interval: {interval} seconds and using fan curves from {path}\n");
             let t = thread::spawn(move || {
                 let mut controller = Controller::new(&path);
                 controller.watch(interval, &sig_clone);
