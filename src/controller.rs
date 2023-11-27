@@ -308,7 +308,7 @@ fn line_to_coords(line: &str) -> Vec<CoOrdinates> {
 
 fn get_boost_from_temp(temp: u8, coords: &Vec<CoOrdinates>) -> u8 {
     for coord in coords {
-        if temp > coord.temp {
+        if temp < coord.temp {
             return coord.fan_boost;
         }
     }
