@@ -102,6 +102,9 @@ fn handle_args(args: CmdArgs) {
                             print!("Reloading...\n");
                             signal.store(3, Ordering::SeqCst);
                         }
+                        "n" => {
+                            signal.store(4, Ordering::SeqCst);
+                        }
                         "p" => {
                             if let Some(t) = t.take() {
                                 signal.store(-1, Ordering::SeqCst);

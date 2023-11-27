@@ -307,15 +307,20 @@ fn line_to_coords(line: &str) -> Vec<CoOrdinates> {
 }
 
 fn get_boost_from_temp(temp: u8, coords: &Vec<CoOrdinates>) -> u8 {
-    for i in 0..coords.len() - 1 {
-        let a = &coords[i];
-        let b = &coords[i + 1];
-        if temp >= a.temp && temp < b.temp {
-            let boost =
-                a.fan_boost + (temp - a.temp) * ((b.fan_boost - a.fan_boost) / (b.temp - a.temp));
-            return boost;
+    for coord in coords {
+        if temp > coord.temp {
+            return coord.fan_boost;
         }
     }
+    // for i in 0..coords.len() - 1 {
+    //     let a = &coords[i];
+    //     let b = &coords[i + 1];
+    //     if temp >= a.temp && temp < b.temp {
+    //         let boost =
+    //             a.fan_boost + (temp - a.temp) * ((b.fan_boost - a.fan_boost) / (b.temp - a.temp));
+    //         return boost;
+    //     }
+    // }
     return coords.last().unwrap().fan_boost;
 }
 
