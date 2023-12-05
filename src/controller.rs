@@ -6,6 +6,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+use crate::GraphType;
+
 const ACPI_CALL_FPATH: &'static str = "/proc/acpi/call";
 
 const RESET: &'static str = "\x1b[0m";
@@ -67,7 +69,12 @@ impl Controller {
         }
     }
 
-    pub fn watch(&mut self, update_interval_in_seconds: u64, exit_sig: &AtomicIsize) {
+    pub fn watch(
+        &mut self,
+        update_interval_in_seconds: u64,
+        graph_type: GraphType,
+        exit_sig: &AtomicIsize,
+    ) {
         let milli_sec_dur = Duration::from_millis(200);
         loop {
             if self.power_mode == 0 {
@@ -100,7 +107,10 @@ impl Controller {
                         "{} Sensor {BOLD}#{}{RESET} Temp: {YELLOW}{}{RESET}\n",
                         info.dev.name, info.dev.sen_id, temp
                     );
-                    let boost = get_boost_from_temp(temp, &info.graph);
+                    let boost = match graph_type {
+                        GraphType::Linear => get_boost_from_temp_linear(temp, &info.graph),
+                        GraphType::Step => get_boost_from_temp_step(temp, &info.graph),
+                    };
                     if boost != info.last_fan_boost {
                         let result = set_fan_boost(info.dev.fan_id, boost);
                         print!("Fan {BOLD}#{}{RESET} Boost: {YELLOW}{}{RESET}/255 RPM: {GREEN}{}{RESET} Result: {}\n",info.dev.fan_id, boost,rpm, result);
@@ -306,21 +316,24 @@ fn line_to_coords(line: &str) -> Vec<CoOrdinates> {
     return v;
 }
 
-fn get_boost_from_temp(temp: u8, coords: &Vec<CoOrdinates>) -> u8 {
+fn get_boost_from_temp_step(temp: u8, coords: &Vec<CoOrdinates>) -> u8 {
     for coord in coords {
         if temp < coord.temp {
             return coord.fan_boost;
         }
     }
-    // for i in 0..coords.len() - 1 {
-    //     let a = &coords[i];
-    //     let b = &coords[i + 1];
-    //     if temp >= a.temp && temp < b.temp {
-    //         let boost =
-    //             a.fan_boost + (temp - a.temp) * ((b.fan_boost - a.fan_boost) / (b.temp - a.temp));
-    //         return boost;
-    //     }
-    // }
+    return coords.last().unwrap().fan_boost;
+}
+fn get_boost_from_temp_linear(temp: u8, coords: &Vec<CoOrdinates>) -> u8 {
+    for i in 0..coords.len() - 1 {
+        let a = &coords[i];
+        let b = &coords[i + 1];
+        if temp >= a.temp && temp < b.temp {
+            let boost =
+                a.fan_boost + (temp - a.temp) * ((b.fan_boost - a.fan_boost) / (b.temp - a.temp));
+            return boost;
+        }
+    }
     return coords.last().unwrap().fan_boost;
 }
 

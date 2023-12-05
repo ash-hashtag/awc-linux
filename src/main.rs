@@ -15,7 +15,7 @@ use std::{
     time::Duration,
 };
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use controller::*;
 
 #[derive(Parser, Debug)]
@@ -26,14 +26,23 @@ struct CmdArgs {
     commands: Commands,
 }
 
+#[derive(Debug, ValueEnum, Clone, Copy)]
+pub enum GraphType {
+    Linear,
+    Step,
+}
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     Watch {
         #[arg(default_value_t = 30, short, long)]
         interval: u64,
 
-        #[arg(short, long)]
+        #[arg(short, long, default_value_t = String::from("/etc/awc-graph"))]
         path: String,
+
+        #[arg(short, long, value_enum, default_value_t = GraphType::Linear)]
+        graph: GraphType,
     },
 
     Info,
@@ -55,7 +64,11 @@ fn main() {
 
 fn handle_args(args: CmdArgs) {
     match args.commands {
-        Commands::Watch { interval, path } => {
+        Commands::Watch {
+            interval,
+            path,
+            graph,
+        } => {
             let signal = Arc::new(AtomicIsize::new(0));
             let sig_clone = signal.clone();
             let p = path.clone();
@@ -76,7 +89,7 @@ fn handle_args(args: CmdArgs) {
 
             let mut t = Some(thread::spawn(move || {
                 let mut controller = Controller::new(alien_dev_infos);
-                controller.watch(interval, &sig_clone);
+                controller.watch(interval, graph, &sig_clone);
             }));
 
             loop {
@@ -117,7 +130,7 @@ fn handle_args(args: CmdArgs) {
                                     get_alien_dev_graph_info(cpu_graph.clone(), gpu_graph.clone());
                                 t = Some(thread::spawn(move || {
                                     let mut controller = Controller::new(alien_dev_infos);
-                                    controller.watch(interval, &sig_clone);
+                                    controller.watch(interval, graph, &sig_clone);
                                 }));
                                 print!("Resumed Watch\n");
                             }

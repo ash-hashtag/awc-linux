@@ -1,0 +1,6 @@
+{
+  "cpu_graph": "",
+  "gpu_graph": "",
+  "disable_power_mode_on_startup": true,
+  "graph_type": "linear", // or "step"
+}
